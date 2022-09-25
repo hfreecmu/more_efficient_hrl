@@ -46,11 +46,11 @@ flags.DEFINE_string('goal_sample_strategy', 'sample',
 LOAD_PATH = None
 
 
-def collect_experience(tf_env, agent, meta_agent, state_preprocess,
-                       replay_buffer, meta_replay_buffer,
-                       action_fn, meta_action_fn,
+def collect_experience(tf_env, agent, mid_agent, meta_agent, state_preprocess,
+                       replay_buffer, mid_replay_buffer, meta_replay_buffer,
+                       action_fn, nid_action_fn, meta_action_fn,
                        environment_steps, num_episodes, num_resets,
-                       episode_rewards, episode_meta_rewards,
+                       episode_rewards, episode_mid_rewards, episode_meta_rewards,
                        store_context,
                        disable_agent_reset):
   """Collect experience in a tf_env into a replay_buffer using action_fn.
@@ -77,6 +77,7 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
   state = tf_env.current_obs()
   state_repr = state_preprocess(state)
   action = action_fn(state, context=None)
+  mid_action = mid_action_fn(state, context=None)
 
   with tf.control_dependencies([state]):
     transition_type, reward, discount = tf_env.step(action)
@@ -90,9 +91,11 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
   def increment_reset():
     return num_resets.assign_add(1)
 
-  def update_episode_rewards(context_reward, meta_reward, reset):
+  def update_episode_rewards(context_reward, mid_reward, meta_reward, reset):
     new_episode_rewards = tf.concat(
         [episode_rewards[:1] + context_reward, episode_rewards[1:]], 0)
+    new_episode_mid_rewards = tf.concat(
+        [episode_mid_rewards[:1] + mid_reward, episode_mid_rewards[1:]], 0)
     new_episode_meta_rewards = tf.concat(
         [episode_meta_rewards[:1] + meta_reward,
          episode_meta_rewards[1:]], 0)
@@ -101,6 +104,10 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
             tf.cond(reset,
                     lambda: tf.concat([[0.], episode_rewards[:-1]], 0),
                     lambda: new_episode_rewards)),
+        episode_mid_rewards.assign(
+            tf.cond(reset,
+                    lambda: tf.concat([[0.], episode_mid_rewards[:-1]], 0),
+                    lambda: new_episode_mid_rewards)),
         episode_meta_rewards.assign(
             tf.cond(reset,
                     lambda: tf.concat([[0.], episode_meta_rewards[:-1]], 0),
@@ -137,11 +144,13 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
 
   if store_context:
     context = [tf.identity(var) + tf.zeros_like(var) for var in agent.context_vars]
+    mid_context = [tf.identity(var) + tf.zeros_like(var) for var in mid_agent.context_vars]
     meta_context = [tf.identity(var) + tf.zeros_like(var) for var in meta_agent.context_vars]
   else:
     context = []
+    mid_context = []
     meta_context = []
-  with tf.control_dependencies([next_state] + context + meta_context):
+  with tf.control_dependencies([next_state] + context + mid_context + meta_context):
     if disable_agent_reset:
       collect_experience_ops = [tf.no_op()]  # don't reset agent
     else:
@@ -149,60 +158,100 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
           tf.logical_not(reset_episode_cond),
           [state, action, reward, next_state,
            state_repr, next_state_repr],
-          mode='explore', meta_action_fn=meta_action_fn)
-      context_reward, meta_reward = collect_experience_ops
+          mode='explore', meta_action_fn=mid_action_fn, grand_meta_action_fn=meta_action_fn)
+      context_reward, mid_reward, meta_reward = collect_experience_ops # Edit agent function
       collect_experience_ops = list(collect_experience_ops)
       collect_experience_ops.append(
-          update_episode_rewards(tf.reduce_sum(context_reward), meta_reward,
+          update_episode_rewards(tf.reduce_sum(context_reward), mid_reward, meta_reward,
                                  reset_episode_cond))
 
   meta_action_every_n = agent.tf_context.meta_action_every_n
   with tf.control_dependencies(collect_experience_ops):
     transition = [state, action, reward, discount, next_state]
 
-    meta_action = tf.to_float(
-        tf.concat(context, -1))  # Meta agent action is low-level context
+    mid_action = tf.to_float(
+        tf.concat(context, -1))  # Mid agent action is low-level context
 
-    meta_end = tf.logical_and(  # End of meta-transition.
+    meta_action = tf.to_float(
+        tf.concat(mid_context, -1))  # Meta agent action is mid-level context
+
+    mid_end = tf.logical_and(  # End of mid-transition.
         tf.equal(agent.tf_context.t % meta_action_every_n, 1),
         agent.tf_context.t > 1)
+
+    meta_end = tf.logical_and(  # End of meta-transition.
+        tf.equal(agent.tf_context.t % meta_action_every_n**2, 1),
+        agent.tf_context.t > 1)
     with tf.variable_scope(tf.get_variable_scope(), reuse=tf.AUTO_REUSE):
-      states_var = tf.get_variable('states_var',
+      mid_states_var = tf.get_variable('mid_states_var',
                                    [meta_action_every_n, state.shape[-1]],
                                    state.dtype)
-      actions_var = tf.get_variable('actions_var',
+      meta_states_var = tf.get_variable('meta_states_var',
+                                   [meta_action_every_n, state.shape[-1]],
+                                   state.dtype)
+      mid_actions_var = tf.get_variable('mid_actions_var',
                                     [meta_action_every_n, action.shape[-1]],
                                     action.dtype)
-      state_var = tf.get_variable('state_var', state.shape, state.dtype)
-      reward_var = tf.get_variable('reward_var', reward.shape, reward.dtype)
+      meta_actions_var = tf.get_variable('meta_actions_var',
+                                    [meta_action_every_n, action.shape[-1]],
+                                    action.dtype)
+      mid_state_var = tf.get_variable('mid_state_var', state.shape, state.dtype)
+      meta_state_var = tf.get_variable('meta_state_var', state.shape, state.dtype)
+      mid_reward_var = tf.get_variable('mid_reward_var', reward.shape, reward.dtype)
+      meta_reward_var = tf.get_variable('meta_reward_var', reward.shape, reward.dtype)
+
+      mid_action_var = tf.get_variable('mid_action_var',
+                                        mid_action.shape, mid_action.dtype)
       meta_action_var = tf.get_variable('meta_action_var',
                                         meta_action.shape, meta_action.dtype)
+      mid_context_var = [
+          tf.get_variable('mid_context_var%d' % idx,
+                          mid_context[idx].shape, mid_context[idx].dtype)
+          for idx in range(len(mid_context))]
       meta_context_var = [
           tf.get_variable('meta_context_var%d' % idx,
                           meta_context[idx].shape, meta_context[idx].dtype)
           for idx in range(len(meta_context))]
 
-    actions_var_upd = tf.scatter_update(
-        actions_var, (agent.tf_context.t - 2) % meta_action_every_n, action)
-    with tf.control_dependencies([actions_var_upd]):
-      actions = tf.identity(actions_var) + tf.zeros_like(actions_var)
+    mid_actions_var_upd = tf.scatter_update(
+        mid_actions_var, (agent.tf_context.t - 2) % meta_action_every_n, action)
+    with tf.control_dependencies([mid_actions_var_upd]):
+      mid_actions = tf.identity(mid_actions_var) + tf.zeros_like(actions_var)
+      mid_reward = tf.identity(mid_reward) + tf.zeros_like(mid_reward)
+      mid_reward = tf.reshape(mid_reward, reward.shape)
+    
+    meta_actions_var_upd = tf.scatter_update(
+        meta_actions_var, (agent.tf_context.t - 2) % meta_action_every_n**2, meta_action)
+    with tf.control_dependencies([meta_actions_var_upd]):
+      meta_actions = tf.identity(meta_actions_var) + tf.zeros_like(actions_var)
       meta_reward = tf.identity(meta_reward) + tf.zeros_like(meta_reward)
       meta_reward = tf.reshape(meta_reward, reward.shape)
 
     reward = 0.1 * meta_reward
     meta_transition = [state_var, meta_action_var,
-                       reward_var + reward,
+                       meta_reward_var + reward,
                        discount * (1 - tf.to_float(next_reset_episode_cond)),
                        next_state]
     meta_transition.extend([states_var, actions])
+
+    reward = 0.1 * mid_reward
+    mid_transition = [state_var, mid_action_var,
+                       mid_reward_var + reward,
+                       discount * (1 - tf.to_float(next_reset_episode_cond)),
+                       next_state]
+    mid_transition.extend([states_var, actions])
+
     if store_context:  # store current and next context into replay
       transition += context + list(agent.context_vars)
+      mid_transition += mid_context_var + list(mid_agent.context_vars)
       meta_transition += meta_context_var + list(meta_agent.context_vars)
 
+    mid_step_cond = tf.squeeze(tf.logical_and(step_cond, tf.logical_or(next_reset_episode_cond, mid_end)))
     meta_step_cond = tf.squeeze(tf.logical_and(step_cond, tf.logical_or(next_reset_episode_cond, meta_end)))
 
     collect_experience_op = tf.group(
         replay_buffer.maybe_add(transition, step_cond),
+        mid_replay_buffer.maybe_add(mid_transition, mid_step_cond),
         meta_replay_buffer.maybe_add(meta_transition, meta_step_cond),
     )
 
@@ -211,19 +260,45 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
                                     tf_env.reset,
                                     tf_env.current_time_step)
 
-    meta_period = tf.equal(agent.tf_context.t % meta_action_every_n, 1)
-    states_var_upd = tf.scatter_update(
+    mid_period = tf.equal(agent.tf_context.t % meta_action_every_n, 1)
+    mid_states_var_upd = tf.scatter_update(
         states_var, (agent.tf_context.t - 1) % meta_action_every_n,
         next_state)
-    state_var_upd = tf.assign(
+    mid_state_var_upd = tf.assign(
+        state_var,
+        tf.cond(mid_period, lambda: next_state, lambda: state_var))
+    mid_reward_var_upd = tf.assign(
+        reward_var,
+        tf.cond(mid_period,
+                lambda: tf.zeros_like(reward_var),
+                lambda: reward_var + reward))
+
+    meta_period = tf.equal(agent.tf_context.t % meta_action_every_n**2, 1)
+    meta_states_var_upd = tf.scatter_update(
+        states_var, (agent.tf_context.t - 1) % meta_action_every_n**2,
+        next_state)
+    meta_state_var_upd = tf.assign(
         state_var,
         tf.cond(meta_period, lambda: next_state, lambda: state_var))
-    reward_var_upd = tf.assign(
+    meta_reward_var_upd = tf.assign(
         reward_var,
         tf.cond(meta_period,
                 lambda: tf.zeros_like(reward_var),
                 lambda: reward_var + reward))
-    meta_action = tf.to_float(tf.concat(agent.context_vars, -1))
+
+    mid_action = tf.to_float(tf.concat(agent.context_vars, -1))
+    mid_action_var_upd = tf.assign(
+        mid_action_var,
+        tf.cond(mid_period, lambda: mid_action, lambda: mid_action_var))
+    mid_context_var_upd = [
+        tf.assign(
+            mid_context_var[idx],
+            tf.cond(mid_period,
+                    lambda: mid_agent.context_vars[idx],
+                    lambda: mid_context_var[idx]))
+        for idx in range(len(mid_context))]
+
+    meta_action = tf.to_float(tf.concat(mid_agent.context_vars, -1))
     meta_action_var_upd = tf.assign(
         meta_action_var,
         tf.cond(meta_period, lambda: meta_action, lambda: meta_action_var))
@@ -237,10 +312,15 @@ def collect_experience(tf_env, agent, meta_agent, state_preprocess,
 
   return tf.group(
       collect_experience_op,
-      states_var_upd,
-      state_var_upd,
-      reward_var_upd,
+      mid_states_var_upd,
+      meta_states_var_upd,
+      mid_state_var_upd,
+      meta_state_var_upd,
+      mid_reward_var_upd,
+      meta_reward_var_upd,
+      mid_action_var_upd,
       meta_action_var_upd,
+      *mid_context_var_upd,
       *meta_context_var_upd)
 
 
@@ -276,6 +356,7 @@ def train_uvf(train_dir,
               inverse_dynamics_class=None,
               exp_action_wrapper=None,
               replay_buffer=None,
+              mid_replay_buffer=None,
               meta_replay_buffer=None,
               replay_num_steps=1,
               meta_replay_num_steps=1,
@@ -342,13 +423,23 @@ def train_uvf(train_dir,
         debug_summaries=debug_summaries)
   meta_agent.set_replay(replay=meta_replay_buffer)
 
+  with tf.variable_scope('mid_agent'):
+    mid_agent = meta_agent_class(
+        observation_spec,
+        action_spec,
+        tf_env,
+        debug_summaries=debug_summaries)
+    mid_agent.set_meta_agent(agent=meta_agent)
+    mid_agent.set_replay(replay=mid_replay_buffer)
+
   with tf.variable_scope('uvf_agent'):
     uvf_agent = agent_class(
         observation_spec,
         action_spec,
         tf_env,
         debug_summaries=debug_summaries)
-    uvf_agent.set_meta_agent(agent=meta_agent)
+    uvf_agent.set_meta_agent(agent=mid_agent)
+    uvf_agent.set_grand_meta_agent(agent=meta_agent)
     uvf_agent.set_replay(replay=replay_buffer)
 
   with tf.variable_scope('state_preprocess'):
@@ -356,15 +447,17 @@ def train_uvf(train_dir,
 
   with tf.variable_scope('inverse_dynamics'):
     inverse_dynamics = inverse_dynamics_class(
-        meta_agent.sub_context_as_action_specs[0])
+        mid_agent.sub_context_as_action_specs[0])
 
   # Create counter variables
   global_step = tf.contrib.framework.get_or_create_global_step()
   num_episodes = tf.Variable(0, dtype=tf.int64, name='num_episodes')
   num_resets = tf.Variable(0, dtype=tf.int64, name='num_resets')
   num_updates = tf.Variable(0, dtype=tf.int64, name='num_updates')
+  num_mid_updates = tf.Variable(0, dtype=tf.int64, name='num_mid_updates')
   num_meta_updates = tf.Variable(0, dtype=tf.int64, name='num_meta_updates')
   episode_rewards = tf.Variable([0.] * 100, name='episode_rewards')
+  episode_mid_rewards = tf.Variable([0.] * 100, name='episode_mid_rewards')
   episode_meta_rewards = tf.Variable([0.] * 100, name='episode_meta_rewards')
 
   # Create counter variables summaries
@@ -373,21 +466,30 @@ def train_uvf(train_dir,
       ('num_episodes', num_episodes),
       ('num_resets', num_resets),
       ('num_updates', num_updates),
+      ('num_mid_updates', num_mid_updates),
       ('num_meta_updates', num_meta_updates),
       ('replay_buffer_adds', replay_buffer.get_num_adds()),
+      ('mid_replay_buffer_adds', mid_replay_buffer.get_num_adds()),
       ('meta_replay_buffer_adds', meta_replay_buffer.get_num_adds()),
   ])
 
   tf.summary.scalar('avg_episode_rewards',
                     tf.reduce_mean(episode_rewards[1:]))
+  tf.summary.scalar('avg_episode_mid_rewards',
+                    tf.reduce_mean(episode_mid_rewards[1:]))
   tf.summary.scalar('avg_episode_meta_rewards',
                     tf.reduce_mean(episode_meta_rewards[1:]))
   tf.summary.histogram('episode_rewards', episode_rewards[1:])
+  tf.summary.histogram('episode_mid_rewards', episode_mid_rewards[1:])
   tf.summary.histogram('episode_meta_rewards', episode_meta_rewards[1:])
 
   # Create init ops
   action_fn = uvf_agent.action
   action_fn = uvf_agent.add_noise_fn(action_fn, global_step=None)
+  mid_action_fn = mid_agent.action
+  mid_action_fn = mid_agent.add_noise_fn(mid_action_fn, global_step=None)
+  mid_actions_fn = mid_agent.actions
+  mid_actions_fn = mid_agent.add_noise_fn(mid_actions_fn, global_step=None)
   meta_action_fn = meta_agent.action
   meta_action_fn = meta_agent.add_noise_fn(meta_action_fn, global_step=None)
   meta_actions_fn = meta_agent.actions
@@ -395,16 +497,20 @@ def train_uvf(train_dir,
   init_collect_experience_op = collect_experience(
       tf_env,
       uvf_agent,
+      mid_agent,
       meta_agent,
       state_preprocess,
       replay_buffer,
+      mid_replay_buffer,
       meta_replay_buffer,
       action_fn,
+      mid_action_fn,
       meta_action_fn,
       environment_steps=global_step,
       num_episodes=num_episodes,
       num_resets=num_resets,
       episode_rewards=episode_rewards,
+      episode_mid_rewards=episode_mid_rewards,
       episode_meta_rewards=episode_meta_rewards,
       store_context=True,
       disable_agent_reset=False,
@@ -414,16 +520,20 @@ def train_uvf(train_dir,
   collect_experience_op = collect_experience(
       tf_env,
       uvf_agent,
+      mid_agent,
       meta_agent,
       state_preprocess,
       replay_buffer,
+      mid_replay_buffer,
       meta_replay_buffer,
       action_fn,
+      mid_action_fn,
       meta_action_fn,
       environment_steps=global_step,
       num_episodes=num_episodes,
       num_resets=num_resets,
       episode_rewards=episode_rewards,
+      episode_mid_rewards=episode_mid_rewards,
       episode_meta_rewards=episode_meta_rewards,
       store_context=True,
       disable_agent_reset=False,
@@ -431,10 +541,19 @@ def train_uvf(train_dir,
 
   train_op_list = []
   repr_train_op = tf.constant(0.0)
-  for mode in ['meta', 'nometa']:
+  for mode in ['meta', 'mid', 'nometa']:
     if mode == 'meta':
       agent = meta_agent
       buff = meta_replay_buffer
+      critic_opt = meta_critic_optimizer
+      actor_opt = meta_actor_optimizer
+      relabel = meta_relabel_contexts
+      num_steps = meta_replay_num_steps
+      my_gamma = meta_gamma,
+      n_updates = num_meta_updates
+    elif mode == 'mid':
+      agent = mid_agent
+      buff = mid_replay_buffer
       critic_opt = meta_critic_optimizer
       actor_opt = meta_actor_optimizer
       relabel = meta_relabel_contexts
@@ -470,14 +589,14 @@ def train_uvf(train_dir,
         ]
         batch_size *= (repeat_size + 1)
       states, actions, rewards, discounts, next_states = batch_dequeue[:5]
-      if mode == 'meta':
+      if mode == 'meta' or mode == 'mid':
         low_states = batch_dequeue[5]
         low_actions = batch_dequeue[6]
         low_state_reprs = state_preprocess(low_states)
       state_reprs = state_preprocess(states)
       next_state_reprs = state_preprocess(next_states)
 
-      if mode == 'meta':  # Re-label meta-action
+      if mode == 'meta' or mode == 'mid':  # Re-label meta-action
         prev_actions = actions
         if FLAGS.goal_sample_strategy == 'None':
           pass
@@ -516,7 +635,7 @@ def train_uvf(train_dir,
 
       merged_states = agent.merged_states(states, contexts)
       merged_next_states = agent.merged_states(next_states, next_contexts)
-      if mode == 'nometa':
+      if mode == 'nometa' or mode == 'mid':
         context_rewards, context_discounts = agent.compute_rewards(
             'train', state_reprs, actions, rewards, next_state_reprs, contexts)
       elif mode == 'meta': # Meta-agent uses sum of rewards, not context-specific rewards.
@@ -577,6 +696,10 @@ def train_uvf(train_dir,
   with tf.control_dependencies(train_op_list[2:]):
     update_targets_op = uvf_utils.periodically(
         uvf_agent.update_targets, target_update_period, 'update_targets')
+  if mid_agent is not None:
+    with tf.control_dependencies(train_op_list[:2]):
+      update_mid_targets_op = uvf_utils.periodically(
+          mid_agent.update_targets, target_update_period, 'update_targets')
   if meta_agent is not None:
     with tf.control_dependencies(train_op_list[:2]):
       update_meta_targets_op = uvf_utils.periodically(
@@ -589,6 +712,9 @@ def train_uvf(train_dir,
     train_op = tf.add_n(train_op_list[2:], name='post_update_targets')
     # Representation training steps on every low-level policy training step.
     train_op += repr_train_op
+  with tf.control_dependencies([update_mid_targets_op, assert_op]):
+    mid_train_op = tf.add_n(train_op_list[:2],
+                             name='post_update_mid_targets')
   with tf.control_dependencies([update_meta_targets_op, assert_op]):
     meta_train_op = tf.add_n(train_op_list[:2],
                              name='post_update_meta_targets')
@@ -600,15 +726,15 @@ def train_uvf(train_dir,
     slim.summaries.add_histogram_summaries(
         uvf_agent.get_trainable_actor_vars(), 'actor_vars')
 
-  train_ops = train_utils.TrainOps(train_op, meta_train_op,
+  train_ops = train_utils.TrainOps(train_op, mid_train_op, meta_train_op,
                                    collect_experience_op)
 
   policy_save_path = os.path.join(train_dir, policy_save_dir, 'model.ckpt')
-  policy_vars = uvf_agent.get_actor_vars() + meta_agent.get_actor_vars() + [
+  policy_vars = uvf_agent.get_actor_vars() + mid_agent.get_actor_vars() + meta_agent.get_actor_vars() + [
       global_step, num_episodes, num_resets
-  ] + list(uvf_agent.context_vars) + list(meta_agent.context_vars) + state_preprocess.get_trainable_vars()
+  ] + list(uvf_agent.context_vars) + list(mid_agent.context_vars) + list(meta_agent.context_vars) + state_preprocess.get_trainable_vars()
   # add critic vars, since some test evaluation depends on them
-  policy_vars += uvf_agent.get_trainable_critic_vars() + meta_agent.get_trainable_critic_vars()
+  policy_vars += uvf_agent.get_trainable_critic_vars() + mid_agent.get_trainable_critic_vars() + meta_agent.get_trainable_critic_vars()
   policy_saver = tf.train.Saver(
       policy_vars, max_to_keep=max_policies_to_save, sharded=False)
 
@@ -637,6 +763,7 @@ def train_uvf(train_dir,
 
   local_init_op = tf.local_variables_initializer()
   init_targets_op = tf.group(uvf_agent.update_targets(1.0),
+                             mid_agent.update_targets(1.0),
                              meta_agent.update_targets(1.0))
 
   def initialize_training_fn(sess):

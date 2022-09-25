@@ -2,6 +2,7 @@
 # Config eval
 evaluate.environment = @create_maze_env()
 evaluate.agent_class = %AGENT_CLASS
+evaluate.mid_agent_class = %META_CLASS
 evaluate.meta_agent_class = %META_CLASS
 evaluate.state_preprocess_class = %STATE_PREPROCESS_CLASS
 evaluate.num_episodes_eval = 1

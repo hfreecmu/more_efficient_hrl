@@ -347,7 +347,7 @@ class Context(object):
     assert self._context_multi_transition_fn
     return self._context_multi_transition_fn(contexts, None, None, **kwargs)
 
-  def step(self, mode, agent=None, action_fn=None, **kwargs):
+  def step(self, mode, agent=None, action_fn=None, meta_action_fn=None, **kwargs):
     """Returns [next_contexts..., next_timer] list of ops.
 
     Args:
@@ -367,7 +367,7 @@ class Context(object):
       ops.append(tf.assign_add(self.t, 1))  # increment timer
       return ops
     else:
-      ops = agent.tf_context.step(mode, **kwargs)
+      ops = agent.tf_context.step(mode, agent=agent.meta_agent, action_fn=meta_action_fn, **kwargs)
       state = kwargs['state']
       next_state = kwargs['next_state']
       state_repr = kwargs['state_repr']
@@ -388,7 +388,7 @@ class Context(object):
           return [tf.assign_add(self.t, 1)]  # increment timer
         return ops
 
-  def reset(self, mode, agent=None, action_fn=None, state=None):
+  def reset(self, mode, agent=None, action_fn=None, meta_action_fn=None, state=None):
     """Returns ops that reset the context.
 
     Args:
@@ -413,9 +413,9 @@ class Context(object):
       all_ops += ops
       all_ops.append(self.set_env_context_op(values))
       all_ops.append(tf.assign(self.t, 0))  # reset timer
-      return all_ops
+      return all_ops      
     else:
-      ops = agent.tf_context.reset(mode)
+      ops = agent.tf_context.reset(mode, agent=agent.meta_agent, action_fn=meta_action_fn)
       # NOTE: The code is currently written in such a way that the higher level
       # policy does not provide a low-level context until the second
       # observation.  Insead, we just zero-out low-level contexts.

@@ -95,6 +95,8 @@ def compute_average_reward(sess, env_base, step_fn, gamma, num_steps,
   """
   average_reward = 0
   average_last_reward = 0
+  average_mid_reward = 0
+  average_last_mid_reward = 0
   average_meta_reward = 0
   average_last_meta_reward = 0
   average_success = 0.
@@ -102,26 +104,30 @@ def compute_average_reward(sess, env_base, step_fn, gamma, num_steps,
   for i in range(num_episodes):
     env_base.end_episode()
     env_base.begin_episode()
-    (reward, last_reward, meta_reward, last_meta_reward,
+    (reward, last_reward, mid_reward, last_mid_reward, meta_reward, last_meta_reward,
      states, actions) = compute_reward(
         sess, step_fn, gamma, num_steps)
     s_reward = last_meta_reward  # Navigation
     success = (s_reward > -5.0)  # When using diff=False
-    logging.info('Episode = %d, reward = %s, meta_reward = %f, '
-                 'last_reward = %s, last meta_reward = %f, success = %s',
-                 i, reward, meta_reward, last_reward, last_meta_reward,
+    logging.info('Episode = %d, reward = %s, mid_reward = %f, meta_reward = %f, '
+                 'last_reward = %s, lasT_mid_reward = %f, last meta_reward = %f, success = %s',
+                 i, reward, mid_reward, meta_reward, last_reward, last_mid_reward, last_meta_reward,
                  success)
     average_reward += reward
     average_last_reward += last_reward
+    average_mid_reward += mid_reward
+    average_last_mid_reward += last_mid_reward
     average_meta_reward += meta_reward
     average_last_meta_reward += last_meta_reward
     average_success += success
   average_reward /= num_episodes
   average_last_reward /= num_episodes
+  average_mid_reward /= num_episodes
+  average_last_mid_reward /= num_episodes
   average_meta_reward /= num_episodes
   average_last_meta_reward /= num_episodes
   average_success /= num_episodes
-  return (average_reward, average_last_reward,
+  return (average_reward, average_last_reward, average_mid_reward, average_last_mid_reward,
           average_meta_reward, average_last_meta_reward,
           average_success,
           states, actions)
@@ -142,18 +148,20 @@ def compute_reward(sess, step_fn, gamma, num_steps):
   """
 
   total_reward = 0
+  total_mid_reward = 0
   total_meta_reward = 0
   gamma_step = 1
   states = []
   actions = []
   for _ in range(num_steps):
-    state, action, transition_type, reward, meta_reward, discount, _, _ = step_fn(sess)
+    state, action, transition_type, reward, mid_reward, meta_reward, discount, _, _ = step_fn(sess)
     total_reward += reward * gamma_step * discount
+    total_mid_reward += mid_reward * gamma_step * discount
     total_meta_reward += meta_reward * gamma_step * discount
     gamma_step *= gamma
     states.append(state)
     actions.append(action)
-  return (total_reward, reward, total_meta_reward, meta_reward,
+  return (total_reward, reward, total_mid_reward, mid_reward, total_meta_reward, meta_reward,
           states, actions)
 
 def capture_video(sess, eval_step, env_base, total_steps, video_filename,
@@ -188,7 +196,7 @@ def capture_video(sess, eval_step, env_base, total_steps, video_filename,
 
   for t in range(total_steps):
     try:
-      (next_state, action, transition_type, post_reward, post_meta_reward,
+      (next_state, action, transition_type, post_reward, post_mid_reward, post_meta_reward,
       discount, contexts, state_repr) = eval_step(sess)
     except:
       break

@@ -50,7 +50,7 @@ flags.DEFINE_boolean('summarize_gradients', False,
 FLAGS = flags.FLAGS
 
 TrainOps = namedtuple('TrainOps',
-                      ['train_op', 'meta_train_op', 'collect_experience_op'])
+                      ['train_op', 'mid_train_op', 'meta_train_op', 'collect_experience_op'])
 
 
 class TrainStep(object):
@@ -60,6 +60,7 @@ class TrainStep(object):
                max_number_of_steps=0,
                num_updates_per_observation=1,
                num_collect_per_update=1,
+               num_collect_per_mid_update=1,
                num_collect_per_meta_update=1,
                log_every_n_steps=1,
                policy_save_fn=None,
@@ -85,6 +86,7 @@ class TrainStep(object):
     self.max_number_of_steps = max_number_of_steps
     self.num_updates_per_observation = num_updates_per_observation
     self.num_collect_per_update = num_collect_per_update
+    self.num_collect_per_mid_update = num_collect_per_mid_update
     self.num_collect_per_meta_update = num_collect_per_meta_update
     self.log_every_n_steps = log_every_n_steps
     self.policy_save_fn = policy_save_fn
@@ -117,10 +119,13 @@ class TrainStep(object):
     start_time = time.time()
     if self.train_op_fn is None:
       self.train_op_fn = sess.make_callable([train_ops.train_op, global_step])
+      self.mid_train_op_fn = sess.make_callable([train_ops.mid_train_op, global_step])
       self.meta_train_op_fn = sess.make_callable([train_ops.meta_train_op, global_step])
       self.collect_fn = sess.make_callable([train_ops.collect_experience_op, global_step])
       self.collect_and_train_fn = sess.make_callable(
           [train_ops.train_op, global_step, train_ops.collect_experience_op])
+      self.collect_and_mid_train_fn = sess.make_callable(
+          [train_ops.mid_train_op, global_step, train_ops.collect_experience_op])
       self.collect_and_meta_train_fn = sess.make_callable(
           [train_ops.meta_train_op, global_step, train_ops.collect_experience_op])
     for _ in range(self.num_collect_per_update - 1):
@@ -129,6 +134,11 @@ class TrainStep(object):
       self.train_op_fn()
 
     total_loss, global_step_val, _ = self.collect_and_train_fn()
+
+    if (global_step_val // self.num_collect_per_mid_update !=
+        self.last_global_step_val // self.num_collect_per_mid_update):
+      self.mid_train_op_fn()
+
     if (global_step_val // self.num_collect_per_meta_update !=
         self.last_global_step_val // self.num_collect_per_meta_update):
       self.meta_train_op_fn()

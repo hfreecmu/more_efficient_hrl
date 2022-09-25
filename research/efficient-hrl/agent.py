@@ -35,6 +35,7 @@ class UvfAgentCore(object):
   """
 
   def __init__(self,
+               agent_type,
                observation_spec,
                action_spec,
                tf_env,
@@ -47,6 +48,7 @@ class UvfAgentCore(object):
     """Constructs a UVF agent.
 
     Args:
+      agent_type: For debugging, of type uvf, meta, or gand_meta
       observation_spec: A TensorSpec defining the observations.
       action_spec: A BoundedTensorSpec defining the actions.
       tf_env: A Tensorflow environment object.
@@ -61,6 +63,9 @@ class UvfAgentCore(object):
     Raises:
       ValueError: If 'dqda_clipping' is < 0.
     """
+    assert agent_type in ['uvf, meta, grand_meta'] #remember here meta is mid
+    self.agent_type = agent_type
+
     self._step_cond_fn = step_cond_fn
     self._reset_episode_cond_fn = reset_episode_cond_fn
     self._reset_env_cond_fn = reset_env_cond_fn
@@ -92,9 +97,16 @@ class UvfAgentCore(object):
   def set_meta_agent(self, agent=None):
     self._meta_agent = agent
 
+  def set_grand_meta_agent(self, agent=None):
+    self._grand_meta_agent = agent
+
   @property
   def meta_agent(self):
     return self._meta_agent
+
+  @property
+  def grand_meta_agent(self):
+    return self._grand_meta_agent
 
   def actor_loss(self, states, actions, rewards, discounts,
                  next_states):
@@ -316,7 +328,8 @@ class UvfAgentCore(object):
               axis=1))
     return mix_contexts
 
-  def begin_episode_ops(self, mode, action_fn=None, state=None):
+  def begin_episode_ops(self, mode, action_fn=None, meta_action_fn=None, state=None):
+    assert self.agent_type in ['uvf']
     """Returns ops that reset agent at beginning of episodes.
 
     Args:
@@ -329,10 +342,12 @@ class UvfAgentCore(object):
       sample_action = self.sample_random_actions(1)[0]
       all_ops.append(tf.assign(action_var, sample_action))
     all_ops += self.tf_context.reset(mode=mode, agent=self._meta_agent,
-                                     action_fn=action_fn, state=state)
+                                     action_fn=action_fn, meta_action_fn=meta_action_fn, state=state)
     return all_ops
 
-  def cond_begin_episode_op(self, cond, input_vars, mode, meta_action_fn):
+  def cond_begin_episode_op(self, cond, input_vars, mode, meta_action_fn, grand_meta_action_fn):
+    assert self.agent_type in ['uvf']
+
     """Returns op that resets agent at beginning of episodes.
 
     A new episode is begun if the cond op evalues to `False`.
@@ -357,6 +372,7 @@ class UvfAgentCore(object):
           mode, state_reprs, actions, rewards, next_state_reprs,
           batch_items[6:])[0][0]
       context_reward = tf.cast(context_reward, dtype=reward.dtype)
+
       if self.meta_agent is not None:
         meta_action = tf.concat(self.context_vars, -1)
         items = [state, meta_action, reward, next_state,
@@ -371,19 +387,33 @@ class UvfAgentCore(object):
       else:
         meta_reward = tf.constant(0, dtype=reward.dtype)
 
-      with tf.control_dependencies([context_reward, meta_reward]):
+      if self.grand_meta_agent is not None:
+        grand_meta_action = tf.concat(self.meta_agent.context_vars, -1)
+        items = [state, grand_meta_action, reward, next_state,
+                 state_repr, next_state_repr] + list(self.grand_meta_agent.context_vars)
+        batch_items = [tf.expand_dims(item, 0) for item in items]
+        (states, grand_meta_actions, rewards, next_states,
+         state_reprs, next_state_reprs) = batch_items[:6]
+        grand_meta_reward = self.grand_meta_agent.compute_rewards(
+            mode, states, grand_meta_actions, rewards,
+            next_states, batch_items[6:])[0][0]
+        grand_meta_reward = tf.cast(grand_meta_reward, dtype=reward.dtype)
+      else:
+        grand_meta_reward = tf.constant(0, dtype=reward.dtype)
+
+      with tf.control_dependencies([context_reward, meta_reward, grand_meta_reward]):
         step_ops = self.tf_context.step(mode=mode, agent=self._meta_agent,
                                         state=state,
                                         next_state=next_state,
                                         state_repr=state_repr,
                                         next_state_repr=next_state_repr,
-                                        action_fn=meta_action_fn)
+                                        action_fn=meta_action_fn, meta_action_f=grand_meta_action_fn)
       with tf.control_dependencies(step_ops):
-        context_reward, meta_reward = map(tf.identity, [context_reward, meta_reward])
-      return context_reward, meta_reward
+        context_reward, meta_reward, grand_meta_reward = map(tf.identity, [context_reward, meta_reward, grand_meta_reward])
+      return context_reward, meta_reward, grand_meta_reward
     def begin_episode_fn():
       """Begin op fn."""
-      begin_ops = self.begin_episode_ops(mode=mode, action_fn=meta_action_fn, state=state)
+      begin_ops = self.begin_episode_ops(mode=mode, action_fn=meta_action_fn, meta_action_fn=grand_meta_action_fn, state=state)
       with tf.control_dependencies(begin_ops):
         return tf.zeros_like(reward), tf.zeros_like(reward)
     with tf.control_dependencies(input_vars):

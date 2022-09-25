@@ -95,6 +95,7 @@ def get_evaluate_checkpoint_fn(master, output_dir, eval_step_fns,
     global_step = sess.run(slim.get_global_step())
     should_stop = False
     max_reward = -1e10
+    max_mid_reward = -1e10
     max_meta_reward = -1e10
 
     for eval_tag, (eval_step, env_base,) in sorted(eval_step_fns.items()):
@@ -106,12 +107,15 @@ def get_evaluate_checkpoint_fn(master, output_dir, eval_step_fns,
             '[%s] Computing average reward over %d episodes at global step %d.',
             eval_tag, num_episodes_eval, global_step)
         (average_reward, last_reward,
+         average_mid_reward, last_mid_reward,
          average_meta_reward, last_meta_reward, average_success,
          states, actions) = eval_utils.compute_average_reward(
              sess, env_base, eval_step, gamma, max_steps_per_episode,
              num_episodes_eval)
         tf.logging.info('[%s] Average reward = %f', eval_tag, average_reward)
         tf.logging.info('[%s] Last reward = %f', eval_tag, last_reward)
+        tf.logging.info('[%s] Average mid reward = %f', eval_tag, average_mid_reward)
+        tf.logging.info('[%s] Last mid reward = %f', eval_tag, last_mid_reward)
         tf.logging.info('[%s] Average meta reward = %f', eval_tag, average_meta_reward)
         tf.logging.info('[%s] Last meta reward = %f', eval_tag, last_meta_reward)
         tf.logging.info('[%s] Average success = %f', eval_tag, average_success)
@@ -130,11 +134,15 @@ def get_evaluate_checkpoint_fn(master, output_dir, eval_step_fns,
         # Report the eval stats to the tuner.
         if average_reward > max_reward:
           max_reward = average_reward
+        if average_mid_reward > max_mid_reward:
+          max_mid_reward = average_mid_reward
         if average_meta_reward > max_meta_reward:
           max_meta_reward = average_meta_reward
 
         for (tag, value) in [('Reward/average_%s_reward', average_reward),
                              ('Reward/last_%s_reward', last_reward),
+                             ('Reward/average_%s_mid_reward', average_mid_reward),
+                             ('Reward/last_%s_mid_reward', last_mid_reward),
                              ('Reward/average_%s_meta_reward', average_meta_reward),
                              ('Reward/last_%s_meta_reward', last_meta_reward),
                              ('Reward/average_%s_success', average_success)]:
@@ -194,6 +202,7 @@ def get_eval_step(uvf_agent,
                   state_preprocess,
                   tf_env,
                   action_fn,
+                  mid_action_fn,
                   meta_action_fn,
                   environment_steps,
                   num_episodes,
@@ -204,6 +213,7 @@ def get_eval_step(uvf_agent,
     uvf_agent: A UVF agent.
     tf_env: A TFEnvironment.
     action_fn: A function to produce actions given current state.
+    mid_action_fn: A function to produce mid actions given current state.
     meta_action_fn: A function to produce meta actions given current state.
     environment_steps: A variable to count the number of steps in the tf_env.
     num_episodes: A variable to count the number of episodes.
@@ -253,24 +263,24 @@ def get_eval_step(uvf_agent,
     next_state_repr = state_preprocess(next_state)
 
   with tf.control_dependencies([increment_episode_op]):
-    post_reward, post_meta_reward = uvf_agent.cond_begin_episode_op(
+    post_reward, post_mid_reward, post_meta_reward = uvf_agent.cond_begin_episode_op(
         tf.logical_not(reset_episode_cond),
         [state, action_ph, reward, next_state,
          state_repr, next_state_repr],
-        mode=mode, meta_action_fn=meta_action_fn)
+        mode=mode, mid_action_fn=mid_action_fn, meta_action_fn=meta_action_fn)
 
   # Important: do manual reset after getting the final reward from the
   # unreset environment.
-  with tf.control_dependencies([post_reward, post_meta_reward]):
+  with tf.control_dependencies([post_reward, post_mid_reward, post_meta_reward]):
     cond_reset_op = tf.cond(reset_env_cond,
                             tf_env.reset,
                             tf_env.current_time_step)
 
   # Add a dummy control dependency to force the reset_op to run
   with tf.control_dependencies(cond_reset_op):
-    post_reward, post_meta_reward = map(tf.identity, [post_reward, post_meta_reward])
+    post_reward, post_mid_reward, post_meta_reward = map(tf.identity, [post_reward, post_mid_reward, post_meta_reward])
 
-  eval_step = [next_state, action_ph, transition_type, post_reward, post_meta_reward, discount, uvf_agent.context_vars, state_repr]
+  eval_step = [next_state, action_ph, transition_type, post_reward, post_mid_reward, post_meta_reward, discount, uvf_agent.context_vars, state_repr]
 
   if callable(action):
     def step_fn(sess):
@@ -291,6 +301,7 @@ def evaluate(checkpoint_dir,
              environment=None,
              num_bin_actions=3,
              agent_class=None,
+             mid_agent_class=None,
              meta_agent_class=None,
              state_preprocess_class=None,
              gamma=1.0,
@@ -319,6 +330,7 @@ def evaluate(checkpoint_dir,
     environment: A BaseEnvironment to evaluate.
     num_bin_actions: Number of bins for discretizing continuous actions.
     agent_class: An RL agent class.
+    mid_agent_class: A Mid agent class
     meta_agent_class: A Meta agent class.
     gamma: Discount factor for the reward.
     num_episodes_eval: Number of episodes to evaluate and average reward over.
@@ -359,6 +371,7 @@ def evaluate(checkpoint_dir,
     assert agent_class.ACTION_TYPE == meta_agent_class.ACTION_TYPE
     with tf.variable_scope('meta_agent'):
       meta_agent = meta_agent_class(
+        'grand_meta',
         observation_spec,
         action_spec,
         tf_env,
@@ -366,13 +379,28 @@ def evaluate(checkpoint_dir,
   else:
     meta_agent = None
 
+  if mid_agent_class is not None:
+    assert agent_class.ACTION_TYPE == mid_agent_class.ACTION_TYPE
+    with tf.variable_scope('mid_agent'):
+      mid_agent = mid_agent_class(
+        'meta',
+        observation_spec,
+        action_spec,
+        tf_env,
+      )
+    mid_agent.set_meta_agent(agent=meta_agent)
+  else:
+    mid_agent = None
+
   with tf.variable_scope('uvf_agent'):
     uvf_agent = agent_class(
+        'uvf',
         observation_spec,
         action_spec,
         tf_env,
     )
-    uvf_agent.set_meta_agent(agent=meta_agent)
+    uvf_agent.set_meta_agent(agent=mid_agent)
+    uvf_agent.set_grand_meta_agent(agent=meta_agent)
 
   with tf.variable_scope('state_preprocess'):
     state_preprocess = state_preprocess_class()
@@ -390,22 +418,28 @@ def evaluate(checkpoint_dir,
 
   # create eval_step_fns for each action function
   eval_step_fns = dict()
-  meta_agent = uvf_agent.meta_agent
+  mid_agent = uvf_agent.meta_agent
+  meta_agent = uvf_agent.grand_meta_agent
   for meta in [True] + [False] * evaluate_nohrl:
     meta_tag = 'hrl' if meta else 'nohrl'
-    uvf_agent.set_meta_agent(meta_agent if meta else None)
+    uvf_agent.set_meta_agent(mid_agent if meta else None)
+    uvf_agent.set_grand_meta_agent(meta_agent if meta else None)
+    mid_agent.set_meta_agent(meta_agent if meta else None)
+
     for mode in eval_modes:
       # wrap environment
       wrapped_environment = uvf_agent.get_env_base_wrapper(
           environment, mode=mode)
       action_wrapper = lambda agent_: agent_.action
       action_fn = action_wrapper(uvf_agent)
+      mid_action_fn = action_wrapper(mid_agent)
       meta_action_fn = action_wrapper(meta_agent)
       eval_step_fns['%s_%s' % (mode, meta_tag)] = (get_eval_step(
           uvf_agent=uvf_agent,
           state_preprocess=state_preprocess,
           tf_env=tf_env,
           action_fn=action_fn,
+          mid_action_fn=mid_action_fn,
           meta_action_fn=meta_action_fn,
           environment_steps=tf.Variable(
               0, dtype=tf.int64, name='environment_steps'),

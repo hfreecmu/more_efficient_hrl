@@ -417,6 +417,7 @@ def train_uvf(train_dir,
   assert agent_class.ACTION_TYPE == meta_agent_class.ACTION_TYPE
   with tf.variable_scope('meta_agent'):
     meta_agent = meta_agent_class(
+        'grand_meta',
         observation_spec,
         action_spec,
         tf_env,
@@ -425,6 +426,7 @@ def train_uvf(train_dir,
 
   with tf.variable_scope('mid_agent'):
     mid_agent = meta_agent_class(
+        'meta',
         observation_spec,
         action_spec,
         tf_env,
@@ -434,6 +436,7 @@ def train_uvf(train_dir,
 
   with tf.variable_scope('uvf_agent'):
     uvf_agent = agent_class(
+        'uvf',
         observation_spec,
         action_spec,
         tf_env,

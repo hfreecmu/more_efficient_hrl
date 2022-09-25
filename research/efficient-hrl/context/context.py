@@ -348,6 +348,12 @@ class Context(object):
     return self._context_multi_transition_fn(contexts, None, None, **kwargs)
 
   def step(self, mode, agent=None, action_fn=None, meta_action_fn=None, **kwargs):
+    print('HARDEY')
+    if agent is not None:
+      print(agent.agent_type)
+    else:
+      print('NONE')
+    print(self._context_transition_fn)
     """Returns [next_contexts..., next_timer] list of ops.
 
     Args:

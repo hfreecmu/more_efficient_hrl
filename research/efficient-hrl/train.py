@@ -48,7 +48,7 @@ LOAD_PATH = None
 
 def collect_experience(tf_env, agent, mid_agent, meta_agent, state_preprocess,
                        replay_buffer, mid_replay_buffer, meta_replay_buffer,
-                       action_fn, nid_action_fn, meta_action_fn,
+                       action_fn, mid_action_fn, meta_action_fn,
                        environment_steps, num_episodes, num_resets,
                        episode_rewards, episode_mid_rewards, episode_meta_rewards,
                        store_context,

@@ -63,7 +63,7 @@ class UvfAgentCore(object):
     Raises:
       ValueError: If 'dqda_clipping' is < 0.
     """
-    assert agent_type in ['uvf, meta, grand_meta'] #remember here meta is mid
+    assert agent_type in ['uvf', 'meta', 'grand_meta'] #remember here meta is mid
     self.agent_type = agent_type
 
     self._step_cond_fn = step_cond_fn
@@ -102,6 +102,8 @@ class UvfAgentCore(object):
 
   @property
   def meta_agent(self):
+    if (self.agent_type == 'grand_meta'):
+      return None
     return self._meta_agent
 
   @property
@@ -498,6 +500,7 @@ class MetaAgentCore(UvfAgentCore):
   """
 
   def __init__(self,
+               agent_type,
                observation_spec,
                action_spec,
                tf_env,
@@ -527,6 +530,8 @@ class MetaAgentCore(UvfAgentCore):
     Raises:
       ValueError: If 'dqda_clipping' is < 0.
     """
+    self.agent_type = agent_type
+
     self._step_cond_fn = step_cond_fn
     self._reset_episode_cond_fn = reset_episode_cond_fn
     self._reset_env_cond_fn = reset_env_cond_fn
@@ -593,6 +598,7 @@ class UvfAgent(UvfAgentCore, ddpg_agent.TD3Agent):
   ACTION_TYPE = 'continuous'
 
   def __init__(self, *args, **kwargs):
+    print(args)
     UvfAgentCore.__init__(self, *args, **kwargs)
 
 

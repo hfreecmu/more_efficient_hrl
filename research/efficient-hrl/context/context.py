@@ -348,12 +348,6 @@ class Context(object):
     return self._context_multi_transition_fn(contexts, None, None, **kwargs)
 
   def step(self, mode, agent=None, action_fn=None, meta_action_fn=None, **kwargs):
-    print('HARDEY')
-    if agent is not None:
-      print(agent.agent_type)
-    else:
-      print('NONE')
-    print(self._context_transition_fn)
     """Returns [next_contexts..., next_timer] list of ops.
 
     Args:
@@ -362,6 +356,7 @@ class Context(object):
     Returns:
       a list of ops that set the context.
     """
+
     if agent is None:
       ops = []
       if self._context_transition_fn is not None:
@@ -374,10 +369,16 @@ class Context(object):
       return ops
     else:
       ops = agent.tf_context.step(mode, agent=agent.meta_agent, action_fn=meta_action_fn, **kwargs)
+
+      if self._context_transition_fn is None:      
+        #ops.append(tf.assign_add(self.t, 1))  # increment timer
+        return ops
+
       state = kwargs['state']
       next_state = kwargs['next_state']
       state_repr = kwargs['state_repr']
       next_state_repr = kwargs['next_state_repr']
+
       with tf.control_dependencies(ops):  # Step high level context before computing low level one.
         # Get the context transition function output.
         values = self._context_transition_fn(self.vars, self.t, None,

@@ -53,6 +53,25 @@ class Context(object):
                context_transition_fn=None,
                context_multi_transition_fn=None,
                meta_action_every_n=None):
+    dummy_dict = {}
+    dummy_dict['tf_env'] = tf_env
+    dummy_dict['context_ranges'] = context_ranges
+    dummy_dict['context_shapes'] = context_shapes
+    dummy_dict['state_indices'] = state_indices
+    dummy_dict['variable_indices'] = variable_indices
+    dummy_dict['gamma_index'] = gamma_index
+    dummy_dict['settable_context'] = settable_context
+    dummy_dict['timers'] = timers
+    dummy_dict['samplers'] = samplers
+    dummy_dict['reward_weights'] = reward_weights
+    dummy_dict['reward_fn'] = reward_fn
+    dummy_dict['random_sampler_mode'] = random_sampler_mode
+    dummy_dict['normalizers'] = normalizers
+    dummy_dict['context_transition_fn'] = context_transition_fn
+    dummy_dict['context_multi_transition_fn'] = context_multi_transition_fn
+    dummy_dict['meta_action_every_n'] = meta_action_every_n
+    self.dummy_dict = dummy_dict
+
     self._tf_env = tf_env
     self.variable_indices = variable_indices
     self.gamma_index = gamma_index
@@ -163,7 +182,7 @@ class Context(object):
     return contexts, next_contexts
 
   def compute_rewards(self, mode, states, actions, rewards, next_states,
-                      contexts):
+                      contexts, do_haha=False):
     """Compute context-based rewards.
 
     Args:
@@ -176,6 +195,12 @@ class Context(object):
     Returns:
       A [batch_size] tensor representing rewards.
     """
+    if do_haha:
+      state_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+      return self._reward_fn(states, actions, rewards, next_states,
+                           contexts, state_indices=state_indices)
+
+      
     return self._reward_fn(states, actions, rewards, next_states,
                            contexts)
 
@@ -237,16 +262,20 @@ class Context(object):
     for spec, sampler in zip(self.context_specs, sampler_cls_list):
       if isinstance(sampler, (str,)):
         sampler_fn = self._custom_sampler_fns[sampler]
+        raise RuntimeError('no here')
       else:
         sampler_fn = sampler(context_spec=spec)
+        sampler_fn.set_context_range(self.dummy_dict['context_ranges'][0])
         self._samplers[mode].append(sampler_fn)
       sampler_fns.append(sampler_fn)
 
     def batch_sampler_fn(batch_size, state=None, next_state=None, **kwargs):
       """Sampler fn."""
+
       contexts_tuples = [
           sampler(batch_size, state=state, next_state=next_state, **kwargs)
-          for sampler in sampler_fns]
+          for sampler in sampler_fns]        
+
       contexts = [c[0] for c in contexts_tuples]
       next_contexts = [c[1] for c in contexts_tuples]
       contexts = [

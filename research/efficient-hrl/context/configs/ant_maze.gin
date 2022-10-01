@@ -46,6 +46,7 @@ meta/Context.samplers = {
     "eval3": [@eval3/ConstantSampler],
 }
 meta/Context.reward_fn = @task/negative_distance
+meta/Context.context_multi_transition_fn = @relative_context_multi_transition_fn
 
 ## Config rewards
 task/negative_distance.state_indices = [0, 1]

@@ -26,6 +26,8 @@ from context import gin_imports
 # pylint: enable=unused-import
 slim = tf.contrib.slim
 
+import numpy as np
+
 
 @gin.configurable
 class UvfAgentCore(object):
@@ -63,6 +65,7 @@ class UvfAgentCore(object):
     Raises:
       ValueError: If 'dqda_clipping' is < 0.
     """
+    
     assert agent_type in ['uvf', 'meta', 'grand_meta'] #remember here meta is mid
     self.agent_type = agent_type
 
@@ -149,6 +152,7 @@ class UvfAgentCore(object):
   def log_probs(self, states, actions, state_reprs, contexts=None):
     assert contexts is not None
     batch_dims = [tf.shape(states)[0], tf.shape(states)[1]]
+
     contexts = self.tf_context.context_multi_transition_fn(
         contexts, states=tf.to_float(state_reprs))
 
@@ -163,6 +167,9 @@ class UvfAgentCore(object):
 
     error = tf.square(actions - pred_actions)
     spec_range = (self._action_spec.maximum - self._action_spec.minimum) / 2
+
+    spec_range = spec_range.astype(np.float64)
+
     normalized_error = tf.cast(error, tf.float64) / tf.constant(spec_range) ** 2
     return -normalized_error
 
@@ -382,9 +389,10 @@ class UvfAgentCore(object):
         batch_items = [tf.expand_dims(item, 0) for item in items]
         (states, meta_actions, rewards, next_states,
          state_reprs, next_state_reprs) = batch_items[:6]
+
         meta_reward = self.meta_agent.compute_rewards(
             mode, states, meta_actions, rewards,
-            next_states, batch_items[6:])[0][0]
+            next_states, batch_items[6:], do_haha=True)[0][0]
         meta_reward = tf.cast(meta_reward, dtype=reward.dtype)
       else:
         meta_reward = tf.constant(0, dtype=reward.dtype)
@@ -417,7 +425,7 @@ class UvfAgentCore(object):
       """Begin op fn."""
       begin_ops = self.begin_episode_ops(mode=mode, action_fn=meta_action_fn, meta_action_fn=grand_meta_action_fn, state=state)
       with tf.control_dependencies(begin_ops):
-        return tf.zeros_like(reward), tf.zeros_like(reward)
+        return tf.zeros_like(reward), tf.zeros_like(reward), tf.zeros_like(reward)
     with tf.control_dependencies(input_vars):
       cond_begin_episode_op = tf.cond(cond, continue_fn, begin_episode_fn)
     return cond_begin_episode_op
@@ -511,7 +519,7 @@ class MetaAgentCore(UvfAgentCore):
                reset_env_cond_fn=cond_fn.false_fn,
                metrics=None,
                actions_reg=0.,
-               k=2,
+               k=2, hard_tf=False,
                **base_agent_kwargs):
     """Constructs a Meta agent.
 
@@ -540,7 +548,10 @@ class MetaAgentCore(UvfAgentCore):
     self._k = k
 
     # expose tf_context methods
-    self.tf_context = tf_context(tf_env=tf_env)
+    if not hard_tf:
+      self.tf_context = tf_context(tf_env=tf_env)
+    else:
+      self.tf_context = tf_context
     self.sub_context = sub_context(tf_env=tf_env)
     self.set_replay = self.tf_context.set_replay
     self.sample_contexts = self.tf_context.sample_contexts
@@ -797,6 +808,7 @@ class InverseDynamics(object):
 
   def sample(self, states, next_states, num_samples, orig_goals, sc=0.5):
     goal_dim = orig_goals.shape[-1]
+    
     spec_range = (self._spec.maximum - self._spec.minimum) / 2 * tf.ones([goal_dim])
     loc = tf.cast(next_states - states, tf.float32)[:, :goal_dim]
     scale = sc * tf.tile(tf.reshape(spec_range, [1, goal_dim]),

@@ -57,6 +57,7 @@ def index_states(states, indices):
   Returns:
     A [batch_size, num_indices] Tensor representing the batch of indexed states.
   """
+
   if indices is None:
     return states
   indices = tf.constant(indices, dtype=tf.int32)
@@ -360,6 +361,7 @@ def negative_distance(states,
   goals = index_states(contexts[0], goal_indices)
   if relative_context:
     goals = states + goals
+
   sq_dists = tf.squared_difference(next_states * state_scales,
                                    goals * goal_scales)
   old_sq_dists = tf.squared_difference(states * state_scales,

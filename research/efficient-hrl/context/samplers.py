@@ -41,10 +41,14 @@ class BaseSampler(object):
         or Numpy arrays with the same shape as the context.
       scope: A string denoting scope.
     """
+
     self._context_spec = context_spec
     self._context_range = context_range
     self._k = k
     self._scope = scope
+
+  def set_context_range(self, context_range):
+    self._context_range = context_range
 
   def __call__(self, batch_size, **kwargs):
     raise NotImplementedError
@@ -132,6 +136,7 @@ class RandomSampler(BaseSampler):
           dtype=spec.dtype)
     elif isinstance(context_range[0], (list, tuple, np.ndarray)):
       assert len(spec.shape.as_list()) == 1
+
       assert spec.shape.as_list()[0] == len(context_range[0])
       assert spec.shape.as_list()[0] == len(context_range[1])
       contexts = tf.concat(

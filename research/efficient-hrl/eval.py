@@ -34,6 +34,8 @@ import train
 from utils import utils as uvf_utils
 from utils import eval_utils
 from environments import create_maze_env
+
+from context.context import Context
 # pylint: enable=unused-import
 
 flags = tf.app.flags
@@ -267,7 +269,7 @@ def get_eval_step(uvf_agent,
         tf.logical_not(reset_episode_cond),
         [state, action_ph, reward, next_state,
          state_repr, next_state_repr],
-        mode=mode, mid_action_fn=mid_action_fn, meta_action_fn=meta_action_fn)
+        mode=mode, meta_action_fn=mid_action_fn, grand_meta_action_fn=meta_action_fn)
 
   # Important: do manual reset after getting the final reward from the
   # unreset environment.
@@ -381,13 +383,43 @@ def evaluate(checkpoint_dir,
 
   if mid_agent_class is not None:
     assert agent_class.ACTION_TYPE == mid_agent_class.ACTION_TYPE
-    with tf.variable_scope('mid_agent'):
-      mid_agent = mid_agent_class(
+    with tf.variable_scope('mid_agent_dummy'):
+      mid_agent = meta_agent_class(
         'meta',
         observation_spec,
         action_spec,
         tf_env,
       )
+    mid_agent.set_meta_agent(agent=meta_agent)
+
+    dummy_dict_mid = mid_agent.tf_context.dummy_dict
+    dummy_dict_mid['context_shapes'] = [15]
+    dummy_dict_mid['context_ranges'] = [((-10, -10, -0.5, -1, -1, -1, -1, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3), (10,  10,  0.5,  1,  1,  1,  1,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3))]
+
+    new_tf_context = Context(tf_env=dummy_dict_mid['tf_env'],
+                           context_ranges=dummy_dict_mid['context_ranges'],
+                           context_shapes=dummy_dict_mid['context_shapes'],
+                           state_indices=dummy_dict_mid['state_indices'],
+                           variable_indices=dummy_dict_mid['variable_indices'],
+                           gamma_index=dummy_dict_mid['gamma_index'],
+                           settable_context=dummy_dict_mid['settable_context'],
+                           timers=dummy_dict_mid['timers'],
+                           samplers=dummy_dict_mid['samplers'],
+                           reward_weights=dummy_dict_mid['reward_weights'],
+                           reward_fn=dummy_dict_mid['reward_fn'],
+                           random_sampler_mode=dummy_dict_mid['random_sampler_mode'],
+                           normalizers=dummy_dict_mid['normalizers'],
+                           context_transition_fn=dummy_dict_mid['context_transition_fn'],
+                           context_multi_transition_fn=dummy_dict_mid['context_multi_transition_fn'],
+                           meta_action_every_n=dummy_dict_mid['meta_action_every_n'])
+
+    with tf.variable_scope('mid_agent'):
+      mid_agent = meta_agent_class(
+        'meta',
+        observation_spec,
+        action_spec,
+        tf_env,
+        tf_context=new_tf_context, hard_tf=True)
     mid_agent.set_meta_agent(agent=meta_agent)
   else:
     mid_agent = None

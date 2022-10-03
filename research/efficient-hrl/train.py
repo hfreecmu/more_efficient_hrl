@@ -603,7 +603,7 @@ def train_uvf(train_dir,
       relabel = meta_relabel_contexts
       num_steps = meta_replay_num_steps
       my_gamma = meta_gamma,
-      n_updates = num_meta_updates
+      n_updates = num_mid_updates
     else:
       agent = uvf_agent
       buff = replay_buffer

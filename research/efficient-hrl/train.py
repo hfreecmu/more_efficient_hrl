@@ -442,6 +442,7 @@ def train_uvf(train_dir,
   dummy_dict_mid = mid_agent.tf_context.dummy_dict
   dummy_dict_mid['context_shapes'] = [15]
   dummy_dict_mid['context_ranges'] = [((-10, -10, -0.5, -1, -1, -1, -1, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3), (10,  10,  0.5,  1,  1,  1,  1,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3))]
+  dummy_dict_mid['meta_action_every_n'] = mid_agent.tf_context.hacky_mid_action_every_n**2
 
   new_tf_context = Context(tf_env=dummy_dict_mid['tf_env'],
                            context_ranges=dummy_dict_mid['context_ranges'],
@@ -458,7 +459,8 @@ def train_uvf(train_dir,
                            normalizers=dummy_dict_mid['normalizers'],
                            context_transition_fn=dummy_dict_mid['context_transition_fn'],
                            context_multi_transition_fn=dummy_dict_mid['context_multi_transition_fn'],
-                           meta_action_every_n=dummy_dict_mid['meta_action_every_n'])
+                           meta_action_every_n=dummy_dict_mid['meta_action_every_n'],
+                           agent_type="mid")
 
   with tf.variable_scope('mid_agent'):
     mid_agent = meta_agent_class(

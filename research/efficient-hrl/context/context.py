@@ -52,7 +52,10 @@ class Context(object):
                normalizers=None,
                context_transition_fn=None,
                context_multi_transition_fn=None,
-               meta_action_every_n=None):
+               meta_action_every_n=None,
+               agent_type=None,
+               hacky_mid_action_every_n=None):
+
     dummy_dict = {}
     dummy_dict['tf_env'] = tf_env
     dummy_dict['context_ranges'] = context_ranges
@@ -70,7 +73,10 @@ class Context(object):
     dummy_dict['context_transition_fn'] = context_transition_fn
     dummy_dict['context_multi_transition_fn'] = context_multi_transition_fn
     dummy_dict['meta_action_every_n'] = meta_action_every_n
+    dummy_dict['hacky_mid_action_every_n'] = hacky_mid_action_every_n
     self.dummy_dict = dummy_dict
+
+    self.agent_type = agent_type
 
     self._tf_env = tf_env
     self.variable_indices = variable_indices
@@ -145,6 +151,7 @@ class Context(object):
     assert self.n == len(self._normalizers)
 
     self.meta_action_every_n = meta_action_every_n
+    self.hacky_mid_action_every_n = hacky_mid_action_every_n
 
     # create vars
     self.context_vars = {}

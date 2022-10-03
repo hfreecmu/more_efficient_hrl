@@ -21,10 +21,12 @@ EVAL_MODES = ["eval1", "eval2", "eval3"]
 CONTEXT = @agent/Context
 META_CONTEXT = @meta/Context
 
+META_ACTION_EVERY_N = 3
+
 ## Config agent context
 agent/Context.context_ranges = [%context_range]
 agent/Context.context_shapes = [%SUBGOAL_DIM]
-agent/Context.meta_action_every_n = 3
+agent/Context.meta_action_every_n = %META_ACTION_EVERY_N
 agent/Context.samplers = {
     "train": [@train/DirectionSampler],
     "explore": [@train/DirectionSampler],
@@ -34,6 +36,7 @@ agent/Context.context_transition_fn = @relative_context_transition_fn
 agent/Context.context_multi_transition_fn = @relative_context_multi_transition_fn
 
 agent/Context.reward_fn = @uvf/negative_distance
+agent/Context.agent_type = "uvf"
 
 ## Config meta context
 meta/Context.context_ranges = [%meta_context_range]
@@ -47,6 +50,8 @@ meta/Context.samplers = {
 }
 meta/Context.reward_fn = @task/negative_distance
 meta/Context.context_multi_transition_fn = @relative_context_multi_transition_fn
+meta/Context.agent_type = "meta"
+meta/Context.hacky_mid_action_every_n = %META_ACTION_EVERY_N
 
 ## Config rewards
 task/negative_distance.state_indices = [0, 1]

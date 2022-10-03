@@ -24,7 +24,7 @@ META_CONTEXT = @meta/Context
 ## Config agent context
 agent/Context.context_ranges = [%context_range]
 agent/Context.context_shapes = [%SUBGOAL_DIM]
-agent/Context.meta_action_every_n = 10
+agent/Context.meta_action_every_n = 3
 agent/Context.samplers = {
     "train": [@train/DirectionSampler],
     "explore": [@train/DirectionSampler],

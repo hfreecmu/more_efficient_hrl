@@ -665,7 +665,7 @@ def train_uvf(train_dir,
         else:
           assert False
 
-      if state_preprocess.trainable and mode == 'meta':
+      if state_preprocess.trainable and (mode == 'meta' or mode == "mid"):
         # Representation learning is based on meta-transitions, but is trained
         # along with low-level policy updates.
         repr_loss, _, _ = state_preprocess.loss(states, next_states, low_actions, low_states)

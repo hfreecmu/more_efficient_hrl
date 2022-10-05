@@ -765,11 +765,11 @@ def train_uvf(train_dir,
       tf.less_equal(global_step, 200 + num_episodes_train * max_steps_per_episode),
       [global_step])
   with tf.control_dependencies([update_targets_op, assert_op]):
-    train_op = tf.add_n(train_op_list[2:], name='post_update_targets')
+    train_op = tf.add_n(train_op_list[4:], name='post_update_targets')
     # Representation training steps on every low-level policy training step.
     train_op += repr_train_op
   with tf.control_dependencies([update_mid_targets_op, assert_op]):
-    mid_train_op = tf.add_n(train_op_list[:2],
+    mid_train_op = tf.add_n(train_op_list[2:4],
                              name='post_update_mid_targets')
   with tf.control_dependencies([update_meta_targets_op, assert_op]):
     meta_train_op = tf.add_n(train_op_list[:2],

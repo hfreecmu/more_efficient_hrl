@@ -84,7 +84,11 @@ class Context(object):
     self._settable_context = settable_context
     self.timers = timers
     self._context_transition_fn = context_transition_fn
-    self._context_multi_transition_fn = context_multi_transition_fn
+    if agent_type != "meta":
+      self._context_multi_transition_fn = context_multi_transition_fn
+    else:
+      self._context_multi_transition_fn = None
+      
     self._random_sampler_mode = random_sampler_mode
 
     # assign specs

@@ -231,6 +231,7 @@ def collect_experience(tf_env, uvf_agent, mid_agent, meta_agent, state_preproces
       meta_reward = tf.reshape(meta_reward, reward.shape)
 
     reward = 0.1 * meta_reward
+    reward_meta = reward
 
     meta_transition = [meta_state_var, meta_action_var,
                        meta_reward_var + reward,
@@ -239,6 +240,7 @@ def collect_experience(tf_env, uvf_agent, mid_agent, meta_agent, state_preproces
     meta_transition.extend([meta_states_var, meta_actions])
 
     reward = 0.1 * mid_reward
+    reward_mid = reward
     mid_transition = [mid_state_var, mid_action_var,
                        mid_reward_var + reward,
                        discount * (1 - tf.to_float(next_reset_episode_cond)),
@@ -275,7 +277,7 @@ def collect_experience(tf_env, uvf_agent, mid_agent, meta_agent, state_preproces
         mid_reward_var,
         tf.cond(mid_period,
                 lambda: tf.zeros_like(mid_reward_var),
-                lambda: mid_reward_var + reward))
+                lambda: mid_reward_var + reward_mid))
 
     meta_period = tf.equal(mid_agent.tf_context.t % meta_action_every_n, 1)
     meta_states_var_upd = tf.scatter_update(
@@ -288,7 +290,7 @@ def collect_experience(tf_env, uvf_agent, mid_agent, meta_agent, state_preproces
         meta_reward_var,
         tf.cond(meta_period,
                 lambda: tf.zeros_like(meta_reward_var),
-                lambda: meta_reward_var + reward))
+                lambda: meta_reward_var + reward_meta))
 
     mid_action = tf.to_float(tf.concat(uvf_agent.context_vars, -1))
     mid_action_var_upd = tf.assign(

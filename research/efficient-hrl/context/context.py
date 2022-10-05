@@ -387,7 +387,7 @@ class Context(object):
     assert self._context_multi_transition_fn
     return self._context_multi_transition_fn(contexts, None, None, **kwargs)
 
-  def step(self, mode, agent=None, action_fn=None, meta_action_fn=None, **kwargs):
+  def step(self, mode, agent=None, action_fn=None, meta_action_fn=None, temp=None, **kwargs):
     """Returns [next_contexts..., next_timer] list of ops.
 
     Args:
@@ -396,8 +396,11 @@ class Context(object):
     Returns:
       a list of ops that set the context.
     """
+    # 1st time: agent_context, mid_agent, mid_action, meta_action
+    # 2nd time: mid_context, meta_agent, meta_action, None
+    # 3rd time: meta_context, None, None, None
 
-    if agent is None:
+    if agent is None: # meta_context, None, None, None
       ops = []
       if self._context_transition_fn is not None:
         def sampler_fn():
@@ -407,13 +410,15 @@ class Context(object):
         ops += [tf.assign(var, value) for var, value in zip(self.vars, values)]
       ops.append(tf.assign_add(self.t, 1))  # increment timer
       return ops
-    else:
-      ops = agent.tf_context.step(mode, agent=agent.meta_agent, action_fn=meta_action_fn, **kwargs)
+    else: # agent, mid_agent context
+      ops = agent.tf_context.step(mode, agent=agent.meta_agent, action_fn=meta_action_fn, temp=self._context_transition_fn, **kwargs)
 
-      if self._context_transition_fn is None:      
+      if self._context_transition_fn is None:  # self=mid_context, agent=meta_agent, action_fn=meta_action, meta_action_fn=None
         #ops.append(tf.assign_add(self.t, 1))  # increment timer
-        return ops
+        self._context_transition_fn = temp
+        # return ops
 
+      # self=agent_context, agent=mid_agent, action=mid_action_fn, meta_action_fn=meta_action
       state = kwargs['state']
       next_state = kwargs['next_state']
       state_repr = kwargs['state_repr']

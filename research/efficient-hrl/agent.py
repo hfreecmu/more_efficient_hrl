@@ -417,7 +417,7 @@ class UvfAgentCore(object):
                                         next_state=next_state,
                                         state_repr=state_repr,
                                         next_state_repr=next_state_repr,
-                                        action_fn=meta_action_fn, meta_action_f=grand_meta_action_fn)
+                                        action_fn=meta_action_fn, meta_action_fn=grand_meta_action_fn)
       with tf.control_dependencies(step_ops):
         context_reward, meta_reward, grand_meta_reward = map(tf.identity, [context_reward, meta_reward, grand_meta_reward])
       return context_reward, meta_reward, grand_meta_reward

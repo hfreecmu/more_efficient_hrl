@@ -52,7 +52,6 @@ def evaluate_checkpoint_repeatedly(checkpoint_dir,
     retries = 3
     for _ in range(retries):
       try:
-        print('3 HEY HEY: ' + checkpoint_path)
         should_stop = evaluate_checkpoint_fn(checkpoint_path)
         break
       except tf.errors.DataLossError as e:
